@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  deaddrop-server:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - MAX_PAYLOAD_SIZE=1048576
+      - MESSAGE_TTL=86400
+      - MAX_MESSAGES_PER_MAILBOX=1000
+      - RATE_LIMIT_PER_MINUTE=60
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  deaddrop-mcp:
+    build:
+      context: ../mcp-server
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - DEADDROP_SERVER_URL=http://deaddrop-server:8000
+    depends_on:
+      deaddrop-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
